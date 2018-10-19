@@ -15,17 +15,15 @@ use Pho\Kernel\Kernel;
 use Pho\Kernel\Services\ServiceInterface;
 use Pho\Kernel\Services\Index\IndexInterface;
 use Pho\Lib\Graph\EntityInterface;
-use GraphAware\Neo4j\Client\ClientBuilder;
 
 /**
- * Neo4j indexing adapter
+ * Redis indexing adapter
  * 
- * Bolt mode of connection is recommended. Bolt is stateful and binary, 
- * hence more efficient than HTTP or HTTPS.
+ * Redis Graph is a Redis module that makes it Cypher queriable.
  *
  * @author Emre Sokullu
  */
-class Neo4j implements IndexInterface, ServiceInterface
+class Redis implements IndexInterface, ServiceInterface
 {
 
      /**
@@ -35,8 +33,8 @@ class Neo4j implements IndexInterface, ServiceInterface
     protected $kernel;
 
     /**
-     * Neo4J Client
-     * @var \GraphAware\Neo4j\Client\Client
+     * Redis Client
+     * @var Predis\Client
      */
     protected $client;
 
@@ -53,10 +51,7 @@ class Neo4j implements IndexInterface, ServiceInterface
     {
         $this->kernel = $kernel;
      
-        $params = parse_url($uri);
-        $this->client = ClientBuilder::create()
-            ->addConnection($params["scheme"], $uri) 
-            ->build();
+        $this->client = new \Predis\Client($uri);
         
         $this->subscribeGraphsystem();
     }
@@ -91,7 +86,7 @@ class Neo4j implements IndexInterface, ServiceInterface
      */
     public function query(string $query, array $params = array()): \Pho\Kernel\Services\Index\QueryResult
     {
-        $result = $this->client->run($query, $params);
+        $result = $this->client->graph($query, $params);
         $qr = new QueryResult($result);
         return $qr;
     }
