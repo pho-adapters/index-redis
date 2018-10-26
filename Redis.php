@@ -15,11 +15,15 @@ use Pho\Kernel\Kernel;
 use Pho\Kernel\Services\ServiceInterface;
 use Pho\Kernel\Services\Index\IndexInterface;
 use Pho\Lib\Graph\EntityInterface;
+use Redis\Graph;
+use Redis\Graph\Node;
+use Redis\Graph\Edge;
 
 /**
  * Redis indexing adapter
  * 
- * Redis Graph is a Redis module that makes it Cypher queriable.
+ * Redis Graph is a Redis module that makes it 
+ * Cypher queriable.
  *
  * @author Emre Sokullu
  */
@@ -28,12 +32,14 @@ class Redis implements IndexInterface, ServiceInterface
 
      /**
      * Pho-kernel 
+     * 
      * @var Kernel
      */
     protected $kernel;
 
     /**
      * Redis Client
+     * 
      * @var Predis\Client
      */
     protected $client;
@@ -42,16 +48,17 @@ class Redis implements IndexInterface, ServiceInterface
     /**
      * Constructor.
      * 
-     * Initializes neo4j connection. Runs indexing on kernel signals.
+     * Initializes RedisGraph connection. 
+     * Runs indexing on kernel signals.
      * 
      * @param Kernel $kernel Pho Kernel
-     * @param string $uri Connection details for the Neo4J server
+     * @param string $uri Connection details for the Redis server
      */
     public function __construct(Kernel $kernel, string $uri = "")
     {
         $this->kernel = $kernel;
-     
-        $this->client = new \Predis\Client($uri);
+    
+        $this->client = new Graph('index', $this->kernel->database()->client());
         
         $this->subscribeGraphsystem();
     }
@@ -86,9 +93,11 @@ class Redis implements IndexInterface, ServiceInterface
      */
     public function query(string $query, array $params = array()): \Pho\Kernel\Services\Index\QueryResult
     {
-        $result = $this->client->graph($query, $params);
-        $qr = new QueryResult($result);
-        return $qr;
+        $result = $this->client->query(sprintf($query, ...$params));
+        //eval(\Psy\sh());
+        return $result;
+        //$qr = new QueryResult($result);
+        //return $qr;
     }
  
  
@@ -97,11 +106,17 @@ class Redis implements IndexInterface, ServiceInterface
     */
    public function checkNodeUniqueness(string $field_name, /*mixed*/ $field_value, string $label = ""): bool
    {
+       
       if(!empty($label))
         $label = sprintf(":%s", $label);
-      $cypher = sprintf("MATCH(n%s {%s: {%s}}) RETURN n", $label, $field_name, $field_name);
-      $res = $this->query($cypher, [$field_name => $field_value]);   
-      return (count($res->results()) == 0); // that means it's unique
+      $cypher = sprintf(
+          "MATCH(n%s {%s: %s}) RETURN n", 
+          $label, 
+          $field_name, 
+          ( is_int($field_value) || is_double($field_value) ) ? $field_value : ('"' . addslashes($field_value) . '"' )
+      );
+      $res = $this->client->query($cypher);   
+      return (count($res->values) == 0); // that means it's unique
    }
 
     /**
@@ -138,6 +153,34 @@ class Redis implements IndexInterface, ServiceInterface
         $this->kernel->logger()->info("Moving on");
     }
 
+    protected function attributesToCypherCreate(array $entity): string 
+    {
+            $props = [];
+            $attributes = array_merge(["udid"=>$entity["id"]], $entity["attributes"]);
+            foreach ($attributes as $key => $val) {
+              if (is_int($val) || is_double($val)) {
+                $props[] = $key . ':' . $val;
+              } else {
+                $props[] = $key . ':"' . trim((string)$val, '"') . '"';
+              }
+            }
+            return '{' . implode(',', $props) . '}';      
+    }
+
+    protected function attributesToCypherSet(array $entity): string 
+    {
+            $props = [];
+            $attributes = array_merge(["udid"=>$entity["id"]], $entity["attributes"]);
+            foreach ($attributes as $key => $val) {
+              if (is_int($val) || is_double($val)) {
+                $props[] = 'e.' . $key . ' = ' . $val;
+              } else {
+                $props[] = 'e.' . $key . ' = "' . trim((string)$val, '"') . '"';
+              }
+            }
+            return implode(',', $props);      
+    }
+
     /**
      * Indexes a node
      *
@@ -147,18 +190,19 @@ class Redis implements IndexInterface, ServiceInterface
      */
     protected function indexNode(array $entity): void
     {
-        //$this->kernel->logger()->info("Header qualifies it to be indexed");
-        $entity["attributes"]["udid"] = $entity["id"];
-        $cq = sprintf("MERGE (n:%s {udid: {udid}}) SET n = {data}", $entity["label"]);
-        $this->kernel->logger()->info(
-            "The query will be as follows; %s with data ", 
-            $cq
-        //    print_r($entity["attributes"], true)
-        );
-        $result = $this->client->run($cq, [
-            "udid" => $entity["id"],
-            "data" => $entity["attributes"]
-        ]);
+        $query = sprintf("MATCH (n {udid: \"%s\"}) RETURN n", addslashes($entity["id"]));
+        $results = $this->client->query($query);
+        if(count($results->values)==0) {
+            // create
+            $query = sprintf("CREATE (:%s %s)", $entity["label"], $this->attributesToCypherCreate($entity));
+            error_log("create query is: ".$query);
+            $this->client->query($query);
+            return;
+        }
+        // modify
+        $query = sprintf("MATCH (e:%s {udid: \"%s\"}) SET %s", $entity["label"], addslashes($entity["id"]), $this->attributesToCypherSet($entity));
+        error_log("modify query is: ".$query);
+        $this->client->query($query);
     }
 
     /**
@@ -170,15 +214,21 @@ class Redis implements IndexInterface, ServiceInterface
      */
     protected function indexEdge(array $entity): void
     {
-        //$tail_id = $entity[]
-        $entity["attributes"]["udid"] = $entity["id"];
-        $cq = sprintf("MATCH(t {udid: {tail}}), (h {udid: {head}}) MERGE (t)-[e:%s {udid: {udid}}]->(h) SET e = {data}", $entity["label"]);
-        $result = $this->client->run($cq, [
-            "tail" => $entity["tail"],
-            "head" => $entity["head"],
-            "udid" => $entity["id"],
-            "data" => $entity["attributes"]
-        ]);
+
+        $query = sprintf(
+            "MATCH ()-[e: {udid: \"%s\"}]->() DELETE e", 
+                addslashes($entity["id"])
+        );
+        $this->client->query($query);
+
+        $cq = sprintf(
+            "MATCH(t {udid: \"%s\"}), (h {udid: \"%s\"}) CREATE (t)-[e:%s %s]->(h)", 
+            $entity["tail"],
+            $entity["head"],
+            $entity["label"],
+            $this->attributesToCypherCreate($entity)
+        );
+        $this->client->query($cq);
     }
 
     /**
@@ -187,8 +237,14 @@ class Redis implements IndexInterface, ServiceInterface
     public function nodeDeleted(string $id): void 
     {
         $this->kernel->logger()->info("Node deletion request received by %s.", $id);
-        $cq = "MATCH (n {udid: {udid}}) OPTIONAL MATCH (n)-[e]-()  DELETE e, n";
-        $this->client->run($cq, ["udid"=>$id]);
+
+        $cq = sprintf("MATCH (n {udid: \"%s\"})-[e]->() DELETE e", $id);
+        $this->client->query($cq);
+        $cq = sprintf("MATCH ()-[e]->(n {udid: \"%s\"}) DELETE e", $id);
+        $this->client->query($cq);
+        $cq = sprintf("MATCH  (n {udid: \"%s\"}) DELETE n", $id);
+        $this->client->query($cq);
+
         $this->kernel->logger()->info("Node deleted. Moving on.");
     }
 
@@ -198,8 +254,8 @@ class Redis implements IndexInterface, ServiceInterface
     public function edgeDeleted(string $id): void
     {
         $this->kernel->logger()->info("Edge deletion request received by %s.", $id);
-        $cq = "MATCH ()-[e {udid: {udid}}]-()  DELETE e";
-        $this->client->run($cq, ["udid"=>$id]);
+        $cq = sprintf("MATCH ()-[e {udid: \"%s\"]->()  DELETE e", $id);
+        $this->client->query($cq);
         $this->kernel->logger()->info("Edge deleted. Moving on.");
     }
 
@@ -208,14 +264,17 @@ class Redis implements IndexInterface, ServiceInterface
      */
     public function flush(): void
     {
-        $cq = "MATCH (n) OPTIONAL MATCH (n)-[e]-() DELETE e, n;";
-        $this->client->run($cq);
+        $cq = "MATCH ()-[e]->() DELETE e;";
+        $this->client->query($cq);
+        $cq = "MATCH  (n) DELETE n;";
+        $this->client->query($cq);
     }
 
     public function createIndex(string $label, string $field_name): void
     {
-       $cq = sprintf("CREATE INDEX ON :%s(%s)", $label, $field_name);
-       $this->client->run($cq);
+        return;
+       //$cq = sprintf("CREATE INDEX ON :%s(%s)", $label, $field_name);
+       //$this->client->run($cq);
     }
  
 
