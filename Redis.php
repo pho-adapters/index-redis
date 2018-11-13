@@ -88,16 +88,22 @@ class Redis implements IndexInterface, ServiceInterface
         );
     }
 
+    private static function escape(/*mixed*/ $param): string
+        {
+            return (string) (( is_int($param) || is_double($param) ) ? $param : ('"' . addslashes($param) . '"' ));
+        }
+
     /**
      * {@inheritDoc}
      */
     public function query(string $query, array $params = array()): \Pho\Kernel\Services\Index\QueryResult
     {
-        $result = $this->client->query(sprintf($query, ...$params));
+        foreach($params as $key=>$param) {
+            $query = str_replace("\{{$key}\}", self::escape($param), $query);
+        }
+        $result = $this->client->query($query);
         //eval(\Psy\sh());
-        return $result;
-        //$qr = new QueryResult($result);
-        //return $qr;
+        return new QueryResult($result);
     }
  
  
@@ -113,7 +119,7 @@ class Redis implements IndexInterface, ServiceInterface
           "MATCH(n%s {%s: %s}) RETURN n", 
           $label, 
           $field_name, 
-          ( is_int($field_value) || is_double($field_value) ) ? $field_value : ('"' . addslashes($field_value) . '"' )
+          self::escape($field_value)
       );
       $res = $this->client->query($cypher);   
       return (count($res->values) == 0); // that means it's unique
