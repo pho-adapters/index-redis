@@ -25,9 +25,9 @@ class QueryResult extends \Pho\Kernel\Services\Index\QueryResult
      */
     public function __construct($results)
     {
-        error_log("Redis QueryResult executing");
-         error_log("Resuts is a: ".get_class($results));
-         error_log("Resuts are: ".print_r($results->values, true));
+        //error_log("Redis QueryResult executing");
+         //error_log("Resuts is a: ".get_class($results));
+         //error_log("Resuts are: ".print_r($results->values, true));
 
        foreach($results->values as $result) // $result would be a \GraphAware\Bolt\Result\Result 
        {
