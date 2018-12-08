@@ -36,8 +36,8 @@ class QueryResult extends \Pho\Kernel\Services\Index\QueryResult
        $stats = $results->stats;
        $this->summary["nodesCreated"] = isset($stats["nodes_created"])?$stats["nodes_created"]:0;
        $this->summary["nodesDeleted"] = isset($stats["nodes_deleted"])?$stats["nodes_deleted"]:0;
-       $this->summary["edgesCreated"] = isset($stats["edges_created"])?$stats["edges_created"]:0;
-       $this->summary["edgesDeleted"] = isset($stats["edges_deleted"])?$stats["edges_deleted"]:0;
+       $this->summary["edgesCreated"] = isset($stats["relationships_created"])?$stats["relationships_created"]:0;
+       $this->summary["edgesDeleted"] = isset($stats["relationships_deleted"])?$stats["relationships_deleted"]:0;
        $this->summary["propertiesSet"] = isset($stats["properties_set"])?$stats["properties_set"]:0;
        $this->summary["containsUpdates"] = 0;
         
