@@ -101,6 +101,7 @@ class Redis implements IndexInterface, ServiceInterface
         foreach($params as $key=>$param) {
             $query = str_replace("\{{$key}\}", self::escape($param), $query);
         }
+        error_log("query is: ".$query);
         $result = $this->client->query($query);
         //eval(\Psy\sh());
         return new QueryResult($result);
