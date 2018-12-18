@@ -222,6 +222,19 @@ class Redis implements IndexInterface, ServiceInterface
     protected function indexEdge(array $entity): void
     {
 
+        // 
+        $query = sprintf(
+            "MATCH (t {udid: \"%s\"})-[e:%s]->(h {udid: \"%s\"}) RETURN e", 
+                $entity["tail"],
+                $entity["label"],
+                $entity["head"]
+        );
+        $res = $this->client->query($query);
+        if(count($res->values) != 0) {
+            $this->kernel->logger()->info("Edge %s was not indexed due to Redis bug.", $entity["id"]);
+            return; 
+        }
+
         $query = sprintf(
             "MATCH ()-[e: {udid: \"%s\"}]->() DELETE e", 
                 addslashes($entity["id"])
