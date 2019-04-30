@@ -226,6 +226,8 @@ class Redis implements IndexInterface, ServiceInterface
         /*
          * We only currently permit one edge for each [source, destination, relation type] triplet, but don't have logic to enforce that at the time of edge creation yet.
          */
+      /* this has been fixed in April 2019, so disabling this part of the code */
+     /*
         $query = sprintf(
             "MATCH (t {udid: \"%s\"})-[e:%s]->(h {udid: \"%s\"}) RETURN e", 
                 $entity["tail"],
@@ -237,6 +239,7 @@ class Redis implements IndexInterface, ServiceInterface
             $this->kernel->logger()->info("Edge %s was not indexed due to Redis bug.", $entity["id"]);
             return; 
         }
+        */
         // bug related fix finishes here.
 
         $query = sprintf(
