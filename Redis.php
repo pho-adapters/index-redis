@@ -243,7 +243,7 @@ class Redis implements IndexInterface, ServiceInterface
         // bug related fix finishes here.
 
         $query = sprintf(
-            "MATCH ()-[e: {udid: \"%s\"}]->() DELETE e", 
+            "MATCH ()-[e {udid: \"%s\"}]->() DELETE e", 
                 addslashes($entity["id"])
         );
         $this->client->query($query);
